@@ -1,117 +1,6 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: willi
-
----
-
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: containergo-conf
-  namespace: willi
-data:
-  FOO: "hola "
-  BAR: "mundo"
-
----
-
-apiVersion: v1
-kind: Secret
-metadata:
-  name: containergo-secrets
-  namespace: willi
-type: Opaque
-data:
-  SUPERSECRETUSER: ZWxvbg==
-  SUPERSECRETPASS: bXVzaw==
-
-
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: containergo
-  namespace: willi
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: containergo
-  template:
-    metadata:
-      labels:
-        app: containergo
-    spec:
-      containers:
-      - name: containergo
-        image: docker.io/bertontheone/container_go
-        ports:
-        - containerPort: 8080
-        env:
-          - name: SUPERSECRETUSER
-            valueFrom:
-              secretKeyRef:
-                name: containergo-secrets
-                key: SUPERSECRETUSER
-          - name: SUPERSECRETPASS
-            valueFrom:
-              secretKeyRef:
-                name: containergo-secrets
-                key: SUPERSECRETPASS
-          - name: FOO
-            valueFrom:
-              configMapKeyRef:
-                name: containergo-conf
-                key: FOO
-          - name: BAR
-            valueFrom:
-              configMapKeyRef:
-                name: containergo-conf
-                key: BAR
-
----
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: containergo-service
-  namespace: willi
-spec:
-  type: ClusterIP
-  selector:
-    app: containergo
-  ports:
-    - protocol: TCP
-      port: 8080
-      targetPort: 8080
-
----
-
----
-
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: containergo-ingress
-  namespace: berton
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-spec:
-  ingressClassName: nginx
-  rules:
-  - http:
-      paths:
-      - path: /go
-        pathType: Prefix
-        backend:
-          service:
-            name: containergo-service
-            port:
-              number: 8080
-apiVersion: v1
-kind: Namespace
-metadata:
   name: jenkins
 ---
 apiVersion: apps/v1
@@ -129,3 +18,74 @@ spec:
       labels:
         app: jenkins
     spec:
+      containers:
+      - name: jenkins
+        image: jenkins/jenkins:lts
+        env:
+        - name: JENKINS_OPTS
+          value: '--prefix=/jenkins'
+        ports:
+        - containerPort: 8080
+          name: web
+        - containerPort: 50000
+          name: tunnel
+        volumeMounts:
+          - name: jenkins-home
+            mountPath: /var/jenkins_home
+      volumes:
+        - name: jenkins-home
+          hostPath:
+            path: /home/elon/jenkins
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      name: web
+    - port: 50000
+      name: agent
+  selector:
+    app: jenkins
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /jenkins
+        pathType: Prefix
+        backend:
+          service:
+            name: jenkins
+            port:
+              number: 8080
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins
+  namespace: jenkins
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: jenkins
+  namespace: jenkins
